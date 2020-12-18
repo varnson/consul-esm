@@ -78,7 +78,7 @@ func main() {
 
 	gatedWriter.Flush()
 
-	agent, err := NewAgent(config, &logger)
+	agent, err := NewAgent(config, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -122,7 +122,7 @@ func main() {
 	os.Exit(ExitCodeOK)
 }
 
-func handleSignals(logger *hclog.Logger, signalCh chan os.Signal, agent *Agent) {
+func handleSignals(logger hclog.Logger, signalCh chan os.Signal, agent *Agent) {
 	for sig := range signalCh {
 		logger.Debug("Caught signal:", sig.String())
 		switch sig {

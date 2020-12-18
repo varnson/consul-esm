@@ -56,7 +56,7 @@ func (s lastKnownStatus) isExpired(ttl time.Duration, now time.Time) bool {
 type Agent struct {
 	config      *Config
 	client      *api.Client
-	logger      *hclog.Logger
+	logger      hclog.Logger
 	checkRunner *CheckRunner
 	id          string
 
@@ -74,7 +74,7 @@ type Agent struct {
 	memSink *metrics.InmemSink
 }
 
-func NewAgent(config *Config, logger *hclog.Logger) (*Agent, error) {
+func NewAgent(config *Config, logger hclog.Logger) (*Agent, error) {
 	clientConf := config.ClientConfig()
 	client, err := api.NewClient(clientConf)
 	if err != nil {
@@ -97,13 +97,13 @@ func NewAgent(config *Config, logger *hclog.Logger) (*Agent, error) {
 		memSink:           memSink,
 	}
 
-	logger.Info("Connecting to Consul on ", clientConf.Address)
+	logger.Info("Connecting to Consul", "address", clientConf.Address)
 	for {
 		leader, err := client.Status().Leader()
 		if err != nil {
-			logger.Error(hclog.Fmt("error getting leader status: %q, retrying in %s...", err.Error(), retryTime.String()))
+			logger.Error("error getting leader status", "error", hclog.Fmt("%q, retrying in %s...", err.Error(), retryTime.String()))
 		} else if leader == "" {
-			logger.Info(hclog.Fmt("waiting for cluster to elect a leader before starting, will retry in %s...", retryTime.String()))
+			logger.Info("waiting for cluster to elect a leader before starting, will retry in ", "time", hclog.Fmt("%s...", retryTime.String()))
 		} else {
 			break
 		}
@@ -153,7 +153,7 @@ func (a *Agent) Run() error {
 
 	// Clean up.
 	if err := a.client.Agent().ServiceDeregister(a.serviceID()); err != nil {
-		a.logger.Warn(hclog.Fmt(" Failed to deregister service: %v", err))
+		a.logger.Warn(" Failed to deregister service: ", "error", hclog.Fmt("%v", err))
 	}
 
 	return nil
@@ -222,12 +222,12 @@ func (a *Agent) runMetrics() {
 		ctx, cancel := context.WithDeadline(context.Background(), deadline)
 		defer cancel()
 		if err := srv.Shutdown(ctx); err != nil {
-			a.logger.Error(hclog.Fmt("Failed to shutdown metrics interface: %v", err))
+			a.logger.Error("Failed to shutdown metrics interface: ", "error", hclog.Fmt( "%v", err))
 		}
 	}()
 
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-		a.logger.Error(hclog.Fmt("Failed to open metrics interface: %v", err))
+		a.logger.Error("Failed to open metrics interface: ", "error", hclog.Fmt("%v", err))
 	}
 }
 
@@ -244,7 +244,7 @@ func (a *Agent) runRegister() {
 		case <-time.After(agentTTL):
 			services, err := a.client.Agent().Services()
 			if err != nil {
-				a.logger.Error(hclog.Fmt("Failed to check services (will retry): %v", err))
+				a.logger.Error("Failed to check services (will retry): ", "error", hclog.Fmt("%v", err))
 				time.Sleep(retryTime)
 				goto REGISTER_CHECK
 			}
@@ -252,7 +252,7 @@ func (a *Agent) runRegister() {
 			if _, ok := services[serviceID]; !ok {
 				a.logger.Warn(" Service registration was lost, reregistering")
 				if err := a.register(); err != nil {
-					a.logger.Error(hclog.Fmt("[ERR] Failed to reregister service (will retry): %v", err))
+					a.logger.Error("Failed to reregister service (will retry): ", "error", hclog.Fmt("%v", err))
 					time.Sleep(retryTime)
 					goto REGISTER_CHECK
 				}
@@ -287,7 +287,7 @@ REGISTER:
 		},
 	}
 	if err := a.client.Agent().CheckRegister(check); err != nil {
-		a.logger.Error(hclog.Fmt("Failed to register TTL check (will retry): %v", err))
+		a.logger.Error("Failed to register TTL check (will retry): ", "error", hclog.Fmt("%v", err))
 		time.Sleep(retryTime)
 		goto REGISTER
 	}
@@ -300,7 +300,7 @@ REGISTER:
 
 		case <-time.After(agentTTL / 2):
 			if err := a.client.Agent().UpdateTTL(ttlID, "", api.HealthPassing); err != nil {
-				a.logger.Error(hclog.Fmt("Failed to refresh agent TTL check (will reregister): %v", err))
+				a.logger.Error("Failed to refresh agent TTL check (will reregister): ", "error", hclog.Fmt("%v", err))
 				time.Sleep(retryTime)
 				goto REGISTER
 			}
@@ -347,7 +347,7 @@ func (a *Agent) watchNodeList() {
 		// Get the KV entry for this agent's node list.
 		kv, meta, err := a.client.KV().Get(a.kvNodeListPath()+a.serviceID(), opts)
 		if err != nil {
-			a.logger.Warn(hclog.Fmt("Error querying for node watch list: %v", err))
+			a.logger.Warn("Error querying for node watch list: ", "error", hclog.Fmt("%v", err))
 			continue
 		}
 
@@ -361,7 +361,7 @@ func (a *Agent) watchNodeList() {
 
 		var nodeList NodeWatchList
 		if err := json.Unmarshal(kv.Value, &nodeList); err != nil {
-			a.logger.Warn(hclog.Fmt("Error deserializing node list: %v", err))
+			a.logger.Warn("Error deserializing node list: ", "error", hclog.Fmt("%v", err))
 		}
 
 		// Format the node lists for the health check/ping runners.
@@ -377,11 +377,11 @@ func (a *Agent) watchNodeList() {
 
 		nodes, _, err := a.client.Catalog().Nodes(&api.QueryOptions{NodeMeta: a.config.NodeMeta})
 		if err != nil {
-			a.logger.Warn(hclog.Fmt("Error querying for node list: %v", err))
+			a.logger.Warn("Error querying for node list: ", "error", hclog.Fmt("%v", err))
 			continue
 		}
 
-		a.logger.Info(hclog.Fmt("Fetched %d nodes from catalog", len(nodes)))
+		a.logger.Info("Fetched nodes from catalog", "count", hclog.Fmt("%d ", len(nodes)))
 
 		var pingList []*api.Node
 		for _, node := range nodes {
@@ -427,7 +427,7 @@ func (a *Agent) watchHealthChecks(nodeListCh chan map[string]bool) {
 
 	tlsClientConfig, err := api.SetupTLSConfig(&tlsConfig)
 	if err != nil {
-		a.logger.Error(hclog.Fmt("Could not create TLS config: %v", err))
+		a.logger.Error("Could not create TLS config: ", "error", hclog.Fmt("%v", err))
 		return
 	}
 
@@ -457,7 +457,7 @@ func (a *Agent) watchHealthChecks(nodeListCh chan map[string]bool) {
 
 		checks, meta, err := a.client.Health().State(api.HealthAny, opts)
 		if err != nil {
-			a.logger.Warn(hclog.Fmt("Error querying for health check info: %v", err))
+			a.logger.Warn("Error querying for health check info: ", "error", hclog.Fmt("%v", err))
 			continue
 		}
 
@@ -473,7 +473,7 @@ func (a *Agent) watchHealthChecks(nodeListCh chan map[string]bool) {
 
 		if checkCount != len(ourChecks) {
 			checkCount = len(ourChecks)
-			a.logger.Info(hclog.Fmt("Now managing %d health checks across %d nodes", checkCount, len(ourNodes)))
+			a.logger.Info("Now managing ", "", hclog.Fmt("%d health checks across %d nodes", checkCount, len(ourNodes)))
 		}
 	}
 }
@@ -532,7 +532,7 @@ VERIFYCONSULSERVER:
 		if strings.Contains(err.Error(), "429") {
 			// 429 is a warning that something is unhealthy. This may occur when ESM
 			// races with Consul servers first starting up, so this is safe to retry.
-			a.logger.Error(hclog.Fmt("Failed to query for Consul server versions (will retry): %v", err))
+			a.logger.Error("Failed to query for Consul server versions (will retry): ", "error", hclog.Fmt("%v", err))
 			time.Sleep(retryTime)
 			goto VERIFYCONSULSERVER
 		}
